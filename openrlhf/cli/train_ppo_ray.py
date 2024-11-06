@@ -69,7 +69,7 @@ def train(args):
     #   |actor|actor|actor|actor|  ref | ref  | ref  | ref |
     #   |GPU0 |GPU0 |GPU1 |GPU1 | GPU2 | GPU2 | GPU3 | GPU3 |
     #
-    # So 0.75/0.25 gpu is a tricky to let Ray spread all models evenly on all gpus.
+    # So 0.75/0.25 gpu is a trick to let Ray spread all models evenly on all gpus.
     #   |actor| ref  |actor| ref  |actor| ref  |actor|ref  |
     #   |GPU0 | GPU0 |GPU1 | GPU1 |GPU2 | GPU2 |GPU3 | GPU3 |
     actor_model = PPORayActorGroup(
