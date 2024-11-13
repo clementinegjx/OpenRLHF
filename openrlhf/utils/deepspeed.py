@@ -28,6 +28,12 @@ from .deepspeed_utils import (
     get_train_ds_config,
 )
 
+from openrlhf.utils.logging_utils import init_logger
+
+from timeit import default_timer as timer
+
+logger = init_logger(__name__)
+
 ModelOptimPair = Tuple[nn.Module, Optimizer]
 ModelOrModelOptimPair = Union[nn.Module, ModelOptimPair]
 
@@ -136,9 +142,12 @@ class DeepspeedStrategy(ABC):
         name="model",
         **kwargs,
     ) -> None:
+        start = timer()
         if isinstance(model, Actor):
             model = model.model
         model.step()
+        end = timer()
+        logger.info(f"optimizer step time: {end - start}s")
 
     def setup_dataloader(
         self,
@@ -360,6 +369,7 @@ class DeepspeedStrategy(ABC):
                         shutil.copy(os.path.join(train_from_model_path, filename), os.path.join(output_dir, filename))
 
     def all_reduce(self, data, op="mean"):
+        start = timer()
         assert op in ("mean", "max", "sum")
         if isinstance(data, dict):
             ret = {}
@@ -380,14 +390,18 @@ class DeepspeedStrategy(ABC):
             dist.all_reduce(data, op=dist.ReduceOp.MAX if op == "max" else dist.ReduceOp.SUM)
             if is_cpu_tensor:
                 data = data.cpu()
-            return data.item() if not is_tensor else data
+            to_return = data.item() if not is_tensor else data
+            end = timer()
+            logger.info(f"deepspeed all_reduce time: {end - start}s")
+            return to_return
 
     def all_gather(self, data):
+        start = timer()
         if isinstance(data, dict):
             ret = {}
             for k, v in data.items():
                 ret[k] = self.all_gather(v)
-            return ret
+            to_return = ret
         else:
             if not isinstance(data, torch.Tensor):
                 data = torch.Tensor([data])
@@ -395,7 +409,10 @@ class DeepspeedStrategy(ABC):
 
             ret = [torch.zeros_like(data).to(torch.cuda.current_device()) for _ in range(self.world_size)]
             dist.all_gather(ret, data.to(torch.cuda.current_device()))
-            return torch.cat(ret).cpu() if is_cpu_tensor else torch.cat(ret)
+            to_return = torch.cat(ret).cpu() if is_cpu_tensor else torch.cat(ret)
+        end = timer()
+        logger.info(f"deepspeed all_gather time: {end - start}s")
+        return to_return
 
     def print(self, *msg):
         if self.is_rank_0():

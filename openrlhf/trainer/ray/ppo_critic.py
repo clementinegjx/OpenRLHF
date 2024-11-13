@@ -15,6 +15,12 @@ from openrlhf.utils import DeepspeedStrategy, blending_datasets, get_tokenizer
 
 from .launcher import BasePPORole
 
+from openrlhf.utils.logging_utils import init_logger
+
+from timeit import default_timer as timer
+
+logger = init_logger(__name__)
+
 
 class CriticPPOTrainer(PPOTrainer):
     def ppo_train(self):
@@ -154,6 +160,7 @@ class CriticModelRayActor(BasePPORole):
         packed_seq_lens=None,
     ) -> torch.Tensor:
         """Generates critic values."""
+        start = timer()
         device = torch.cuda.current_device()
         self.critic.eval()
         with torch.no_grad():
@@ -161,7 +168,10 @@ class CriticModelRayActor(BasePPORole):
                 sequences.to(device), num_actions, attention_mask.to(device), packed_seq_lens=packed_seq_lens
             )
         self.critic.train()  # reset model state
-        return value.to("cpu")
+        return_value = value.to("cpu")
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} Critic values generation time: {end - start}s")
+        return return_value
 
     def append(self, experience):
         """Append experience to replay buffer."""
@@ -169,11 +179,14 @@ class CriticModelRayActor(BasePPORole):
 
     def fit(self):
         """Train critic model with the replay buffer."""
+        start = timer()
         torch.cuda.empty_cache()
         self.critic.train()
         status = self.trainer.ppo_train()
         self.trainer.replay_buffer.clear()
         torch.cuda.empty_cache()
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} Critic model with the replay buffer training time: {end - start}s")
         return status
 
     def empty_cache(self) -> None:

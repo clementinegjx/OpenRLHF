@@ -20,6 +20,11 @@ from openrlhf.utils.distributed_util import init_process_group
 
 from .launcher import BasePPORole
 
+from openrlhf.utils.logging_utils import init_logger
+
+from timeit import default_timer as timer
+
+logger = init_logger(__name__)
 
 class ActorPPOTrainer(PPOTrainer):
     def __init__(
@@ -67,7 +72,7 @@ class ActorPPOTrainer(PPOTrainer):
         # For ZeRO-1/2:
         #   1. Broadcast parameters from rank 0 to all vllm engines
         # For ZeRO-3:
-        #   1. AllGather paramters to rank 0
+        #   1. AllGather parameters to rank 0
         #   2. Broadcast parameters from rank 0 to all vllm engines
         if self.vllm_engines is not None and torch.distributed.get_rank() == 0:
             master_address = ray._private.services.get_node_ip_address()
@@ -145,6 +150,9 @@ class ActorPPOTrainer(PPOTrainer):
         return self.training_step_actor(experience)
 
     def _broadcast_to_vllm(self):
+        start = timer()
+        allgather_time = 0
+        allgather_ray_time = 0
         # avoid OOM
         torch.cuda.empty_cache()
         model = self.actor.model.module
@@ -161,10 +169,20 @@ class ActorPPOTrainer(PPOTrainer):
                 ]
 
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
+            start_allgather = timer()
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
+                    start_allgather_ray = timer()
                     ray.get(refs)
+                    end_allgather_ray = timer()
+                    allgather_ray_time += end_allgather_ray - start_allgather_ray
+            end_allgather = timer()
+            allgather_time += end_allgather - start_allgather
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} vLLM allgather sharded parameter ray communication time: {allgather_ray_time}s")
+        logger.info(f"{ray.get_gpu_ids()} vLLM allgather sharded parameter time: {allgather_time}s")
+        logger.info(f"{ray.get_gpu_ids()} broadcast to vLLM time: {end - start}s")
 
     def _save_checkpoint(self, args, tag, client_states):
         # call remote critic
@@ -269,6 +287,7 @@ class ActorModelRayActor(BasePPORole):
             strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
 
     def prepare_datasets(self):
+        start = timer()
         strategy = self.strategy
         args = self.strategy.args
 
@@ -326,6 +345,8 @@ class ActorModelRayActor(BasePPORole):
             )
         else:
             self.pretrain_dataloader = None
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} datasets loading time: {end - start}s")
 
     def max_steps(self):
         """Return the maximum number of steps."""
@@ -392,6 +413,7 @@ class ActorModelRayActor(BasePPORole):
             torch.distributed.barrier()
             trainer._broadcast_to_vllm()
 
+        start = timer()
         trainer.fit(
             args,
             self.prompts_dataloader,
@@ -399,6 +421,8 @@ class ActorModelRayActor(BasePPORole):
             self.consumed_samples,
             self.num_update_steps_per_episodes,
         )
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} ActorPPOTrainer fit time: {end - start}s")
 
     def save_model(self):
         args = self.strategy.args

@@ -38,7 +38,7 @@ def _validate_args(args):
             actor_world_size % critic_world_size == 0
         ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
 
-    assert args.zero_stage != 3 or args.vllm_num_engines > 0, f"ZeRO-3 is only supported when vLLM enabled"
+    # assert args.zero_stage != 3 or args.vllm_num_engines > 0, f"ZeRO-3 is only supported when vLLM enabled"
 
 
 def train(args):
@@ -67,7 +67,7 @@ def train(args):
     #   |actor|actor|actor|actor|  ref | ref  | ref  | ref |
     #   |GPU0 |GPU0 |GPU1 |GPU1 | GPU2 | GPU2 | GPU3 | GPU3 |
     #
-    # So 0.75/0.25 gpu is a tricky to let Ray spread all models evenly on all gpus.
+    # So 0.75/0.25 gpu is a trick to let Ray spread all models evenly on all gpus.
     #   |actor| ref  |actor| ref  |actor| ref  |actor|ref  |
     #   |GPU0 | GPU0 |GPU1 | GPU1 |GPU2 | GPU2 |GPU3 | GPU3 |
     actor_model = PPORayActorGroup(
@@ -381,3 +381,12 @@ if __name__ == "__main__":
         assert not args.pretrain_data, "`--pretrain_data` is not supported with `--packing_samples` yet."
 
     train(args)
+    # import cProfile
+    # pr = cProfile.Profile()
+    # try:
+    #     pr.run('train(args)')
+    # except Exception as e:
+    #     print(e)
+    # finally:
+    #     pr.print_stats()
+    #     pr.dump_stats('test.prof')

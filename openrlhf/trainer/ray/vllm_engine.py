@@ -7,6 +7,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from openrlhf.utils.logging_utils import init_logger
 
+from timeit import default_timer as timer
+
 logger = init_logger(__name__)
 
 
@@ -46,7 +48,23 @@ class LLMRayActor:
         self.llm = vllm.LLM(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
-        return self.llm.generate(*args, **kwargs)
+        start = timer()
+        outputs = self.llm.generate(*args, **kwargs)
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} vLLM generation time: {end - start}s")
+        elapsed_time = end - start
+        total_num_tokens = sum(len(output.prompt_token_ids) + len(output.outputs[0].token_ids)
+                               for output in outputs)
+        total_output_tokens = sum(len(output.outputs[0].token_ids) for output in outputs)
+        logger.info(f"Raw data: {len(outputs)} requests, "
+            f"{total_num_tokens} total tokens, "
+            f"{total_output_tokens} output tokens")
+        logger.info(f"Throughput: {len(outputs) / elapsed_time:.2f} requests/s, "
+            f"{total_num_tokens / elapsed_time:.2f} total tokens/s, "
+            f"{total_output_tokens / elapsed_time:.2f} output tokens/s")
+        for res in outputs:
+            logger.info(f"vLLM generation metrics: {res.metrics}")
+        return outputs
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
         if self.use_gpu_executor:
@@ -59,12 +77,16 @@ class LLMRayActor:
             )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        start = timer()
         self.stop_remote_worker_execution_loop()
 
         if self.use_gpu_executor:
-            return self.llm.llm_engine.model_executor.driver_worker.update_weight(name, dtype, shape, empty_cache)
+            to_return = self.llm.llm_engine.model_executor.driver_worker.update_weight(name, dtype, shape, empty_cache)
         else:
-            return self.llm.llm_engine.model_executor._run_workers("update_weight", name, dtype, shape, empty_cache)
+            to_return =self.llm.llm_engine.model_executor._run_workers("update_weight", name, dtype, shape, empty_cache)
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} vLLM weight update time: {end - start}s")
+        return to_return
 
     def stop_remote_worker_execution_loop(self):
         # Fix error for using 2 communication group

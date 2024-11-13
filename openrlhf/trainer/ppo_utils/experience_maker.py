@@ -15,6 +15,8 @@ from openrlhf.models.utils import compute_approx_kl, compute_reward, masked_mean
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn, remote_rm_fn_ray
 
+from timeit import default_timer as timer
+
 logger = init_logger(__name__)
 
 
@@ -61,6 +63,7 @@ class Experience:
 
     @torch.no_grad()
     def to_device(self, device: torch.device) -> None:
+        start = timer()
         self.sequences = to(self.sequences, device)
         self.action_log_probs = to(self.action_log_probs, device)
         self.returns = to(self.returns, device)
@@ -71,8 +74,11 @@ class Experience:
             self.attention_mask = self.attention_mask.to(device)
         if self.action_mask is not None:
             self.action_mask = self.action_mask.to(device)
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} to device time: {end - start}s, device: {device}")
 
     def pin_memory(self):
+        start = timer()
         self.sequences = pin_memory(self.sequences)
         self.action_log_probs = pin_memory(self.action_log_probs)
         self.returns = pin_memory(self.returns)
@@ -83,6 +89,8 @@ class Experience:
             self.attention_mask = self.attention_mask.pin_memory()
         if self.action_mask is not None:
             self.action_mask = self.action_mask.pin_memory()
+        end = timer()
+        logger.info(f"{ray.get_gpu_ids()} pin memory time: {end - start}s")
         return self
 
 
@@ -278,18 +286,25 @@ class NaiveExperienceMaker(ABC):
         num_actions = samples.num_actions
 
         # log probs
+        start = timer()
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        logger.info(f"sequence to actor model time: {timer() - start}s")
 
         # init log probs
+        start = timer()
         base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        logger.info(f"sequence to reference model time: {timer() - start}s")
 
         # values
         if self.critic is not None:
+            start = timer()
             value = self.critic(sequences, num_actions, attention_mask)
+            logger.info(f"sequence to critic model time: {timer() - start}s")
         else:
             value = None
 
         # rewards
+        start = timer()
         if self.remote_rm_url is not None:
             # remote RM
             queries = self.tokenizer.batch_decode(sequences.cpu(), skip_special_tokens=False)
@@ -297,6 +312,7 @@ class NaiveExperienceMaker(ABC):
         else:
             # local RM
             r = self.reward_model(sequences, attention_mask)
+        logger.info(f"sequence to reward model time: {timer() - start}s")
 
         kl = compute_approx_kl(
             action_log_probs,
@@ -591,9 +607,12 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             "num_actions": num_actions,
         }
 
+        logger.info(f"kl mean: {kl_mean}, reward: {r}, response_length: {samples.response_length}, total_length: {samples.total_length}, num_actions: {num_actions}")
+
         if self.strategy.args.perf:
             self.perf_stats["actor_value_rm_time"] += actor_value_rm_time
             self.perf_stats["wait_time"] += wait_time
+            logger.info(f"actor_value_rm_time: {actor_value_rm_time}, wait_time: {wait_time}")
 
         experience = Experience(
             sequences,

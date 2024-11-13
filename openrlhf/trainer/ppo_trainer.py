@@ -18,6 +18,12 @@ from openrlhf.utils.distributed_sampler import DistributedSampler
 
 from .ppo_utils import AdaptiveKLController, Experience, FixedKLController, NaiveExperienceMaker, NaiveReplayBuffer
 
+from openrlhf.utils.logging_utils import init_logger
+
+from timeit import default_timer as timer
+
+logger = init_logger(__name__)
+
 
 class PPOTrainer(ABC):
     """

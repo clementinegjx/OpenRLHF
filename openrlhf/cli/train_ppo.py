@@ -13,6 +13,11 @@ from openrlhf.models import Actor, get_llm_for_sequence_regression
 from openrlhf.trainer import PPOTrainer
 from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
+from openrlhf.utils.logging_utils import init_logger
+
+from timeit import default_timer as timer
+
+logger = init_logger(__name__)
 
 def train(args):
     # configure strategy
@@ -121,6 +126,7 @@ def train(args):
         critic_optim = None
 
     # prepare datasets
+    start = timer()
     prompts_data = blending_datasets(
         args.prompt_data,
         args.prompt_data_probs,
@@ -171,6 +177,8 @@ def train(args):
         )
     else:
         pretrain_dataloader = None
+    end = timer()
+    logger.info(f"datasets preperation time: {end - start}s")
 
     # configure scheduler
     num_update_steps_per_episodes = (

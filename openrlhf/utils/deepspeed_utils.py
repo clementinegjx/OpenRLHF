@@ -52,8 +52,14 @@ def get_train_ds_config(
         },
         "gradient_clipping": max_norm,
         "prescale_gradients": False,
-        "wall_clock_breakdown": False,
+        "wall_clock_breakdown": True,
+        "dump_state": True,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+        "flops_profiler": {"enabled": True, "profile_step": 5},
+        "wandb": {
+            "enabled": True,
+            "project": "train_ds_{}".format(os.getenv("SLURM_JOB_ID")),
+        },
     }
 
 
@@ -78,7 +84,13 @@ def get_eval_ds_config(
         },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
-        "wall_clock_breakdown": False,
+        "wall_clock_breakdown": True,
+        "dump_state": True,
+        "flops_profiler": {"enabled": True, "profile_step": 5},
+        # "wandb": {
+        #     "enabled": True,
+        #     "project": "eval_ds_{}".format(os.getenv("SLURM_JOB_ID")),
+        # },
     }
 
 

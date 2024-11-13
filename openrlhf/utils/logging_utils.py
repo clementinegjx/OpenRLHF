@@ -3,8 +3,10 @@
 """Logging configuration for vLLM."""
 import logging
 import sys
+import os
+import platform
 
-_FORMAT = "%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
+_FORMAT = "custom-logs " + platform.node() + " %(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
 _DATE_FORMAT = "%m-%d %H:%M:%S"
 
 
@@ -24,18 +26,26 @@ class NewLineFormatter(logging.Formatter):
 
 _root_logger = logging.getLogger("openrlhf")
 _default_handler = None
+_file_handler = None
 
+log_file = "/scratch/work/guoj5/OpenRLHF/examples/scripts/logs/{}/{}.txt".format(os.getenv("SLURM_JOB_ID"), platform.node())
 
 def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
-    global _default_handler
+    global _default_handler, _file_handler
     if _default_handler is None:
         _default_handler = logging.StreamHandler(sys.stdout)
         _default_handler.flush = sys.stdout.flush  # type: ignore
         _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
+    if _file_handler is None:
+        _file_handler = logging.FileHandler(log_file)
+        _file_handler.setLevel(logging.INFO)
+        _root_logger.addHandler(_file_handler)
     fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
     _default_handler.setFormatter(fmt)
+    if _file_handler:
+        _file_handler.setFormatter(fmt)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
@@ -50,7 +60,8 @@ _setup_logger()
 def init_logger(name: str):
     # Use the same settings as above for root logger
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.addHandler(_default_handler)
-    logger.propagate = False
+    logger.addHandler(_file_handler)
+    logger.propagate = True
     return logger
